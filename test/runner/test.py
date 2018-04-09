@@ -225,6 +225,10 @@ def parse_args():
                              action='store_true',
                              help='allow destructive tests (--local and --tox only)')
 
+    integration.add_argument('--allow-root',
+                             action='store_true',
+                             help='allow tests requiring root when not root')
+
     integration.add_argument('--retry-on-error',
                              action='store_true',
                              help='retry failed test with increased verbosity')
@@ -397,6 +401,15 @@ def parse_args():
     coverage_report.add_argument('--show-missing',
                                  action='store_true',
                                  help='show line numbers of statements not executed')
+    coverage_report.add_argument('--include',
+                                 metavar='PAT1,PAT2,...',
+                                 help='include only files whose paths match one of these '
+                                      'patterns. Accepts shell-style wildcards, which must be '
+                                      'quoted.')
+    coverage_report.add_argument('--omit',
+                                 metavar='PAT1,PAT2,...',
+                                 help='omit files whose paths match one of these patterns. '
+                                      'Accepts shell-style wildcards, which must be quoted.')
 
     add_extra_coverage_options(coverage_report)
 

@@ -23,17 +23,19 @@ description:
    - "Create and renew SSL certificates with Let's Encrypt. Let's Encrypt is a
       free, automated, and open certificate authority (CA), run for the
       public's benefit. For details see U(https://letsencrypt.org). The current
-      implementation supports the http-01, tls-sni-02 and dns-01 challenges."
-   - "To use this module, it has to be executed at least twice. Either as two
-      different tasks in the same run or during multiple runs."
+      implementation supports the http-01 and dns-01 challenges."
+   - "To use this module, it has to be executed twice. Either as two
+      different tasks in the same run or during two runs. Note that the output
+      of the first run needs to be recorded and passed to the second run as the
+      module argument C(data)."
    - "Between these two tasks you have to fulfill the required steps for the
       chosen challenge by whatever means necessary. For http-01 that means
       creating the necessary challenge file on the destination webserver. For
-      dns-01 the necessary dns record has to be created. tls-sni-02 requires
-      you to create a SSL certificate with the appropriate subjectAlternativeNames.
+      dns-01 the necessary dns record has to be created.
       It is I(not) the responsibility of this module to perform these steps."
    - "For details on how to fulfill these challenges, you might have to read through
-      U(https://tools.ietf.org/html/draft-ietf-acme-acme-09#section-8)"
+      U(https://tools.ietf.org/html/draft-ietf-acme-acme-09#section-8).
+      Also, consider the examples provided for this module."
    - "Although the defaults are chosen so that the module can be used with
       the Let's Encrypt CA, the module can be used with any service using the ACME
       v1 or v2 protocol."
@@ -109,7 +111,7 @@ options:
     version_added: "2.5"
   challenge:
     description: The challenge to be performed.
-    choices: [ 'http-01', 'dns-01', 'tls-sni-02']
+    choices: [ 'http-01', 'dns-01']
     default: 'http-01'
   csr:
     description:
@@ -125,9 +127,10 @@ options:
     aliases: ['src']
   data:
     description:
-      - "The data to validate ongoing challenges."
+      - "The data to validate ongoing challenges. This must be specified for
+         the second run of the module only."
       - "The value that must be used here will be provided by a previous use
-         of this module."
+         of this module. See the examples for more details."
       - "I(Note): the C(data) option was marked as C(no_log) up to
          Ansible 2.5. From Ansible 2.6 on, it is no longer marked this way
          as it causes error messages to be come unusable, and C(data) does
@@ -937,25 +940,10 @@ class ACMEClient(object):
             token = re.sub(r"[^A-Za-z0-9_\-]", "_", challenge['token'])
             keyauthorization = self.account.get_keyauthorization(token)
 
-            # NOTE: tls-sni-01 is not supported by choice
-            # too complex to be useful and tls-sni-02 is an alternative
-            # as soon as it is implemented server side
             if type == 'http-01':
                 # https://tools.ietf.org/html/draft-ietf-acme-acme-09#section-8.3
                 resource = '.well-known/acme-challenge/' + token
                 data[type] = {'resource': resource, 'resource_value': keyauthorization}
-            elif type == 'tls-sni-02':
-                # https://tools.ietf.org/html/draft-ietf-acme-acme-09#section-8.4
-                token_digest = hashlib.sha256(token.encode('utf8')).hexdigest()
-                ka_digest = hashlib.sha256(keyauthorization.encode('utf8')).hexdigest()
-                len_token_digest = len(token_digest)
-                len_ka_digest = len(ka_digest)
-                resource = 'subjectAlternativeNames'
-                value = [
-                    "{0}.{1}.token.acme.invalid".format(token_digest[:len_token_digest // 2], token_digest[len_token_digest // 2:]),
-                    "{0}.{1}.ka.acme.invalid".format(ka_digest[:len_ka_digest // 2], ka_digest[len_ka_digest // 2:]),
-                ]
-                data[type] = {'resource': resource, 'resource_value': value}
             elif type == 'dns-01':
                 # https://tools.ietf.org/html/draft-ietf-acme-acme-09#section-8.5
                 resource = '_acme-challenge'
@@ -1296,7 +1284,7 @@ def main():
             acme_version=dict(required=False, default=1, choices=[1, 2], type='int'),
             agreement=dict(required=False, type='str'),
             terms_agreed=dict(required=False, default=False, type='bool'),
-            challenge=dict(required=False, default='http-01', choices=['http-01', 'dns-01', 'tls-sni-02'], type='str'),
+            challenge=dict(required=False, default='http-01', choices=['http-01', 'dns-01'], type='str'),
             csr=dict(required=True, aliases=['src'], type='path'),
             data=dict(required=False, default=None, type='dict'),
             dest=dict(aliases=['cert'], type='path'),

@@ -216,7 +216,7 @@ options:
     - ' - C(vlan) (integer): VLAN number for this interface.'
     - 'Optional parameters per entry (used for virtual hardware):'
     - ' - C(device_type) (string): Virtual network device (one of C(e1000), C(e1000e), C(pcnet32), C(vmxnet2), C(vmxnet3) (default), C(sriov)).'
-    - ' - C(mac) (string): Customize mac address.'
+    - ' - C(mac) (string): Customize MAC address.'
     - 'Optional parameters per entry (used for OS customization):'
     - ' - C(type) (string): Type of IP assignment (either C(dhcp) or C(static)).'
     - ' - C(ip) (string): Static IP address (implies C(type: static)).'
@@ -230,14 +230,15 @@ options:
     version_added: '2.3'
   customization:
     description:
-    - Parameters for OS customization when cloning from template.
+    - Parameters for OS customization when cloning from the template or the virtual machine.
     - All parameters and VMware object names are case sensitive.
-    - Linux based OS requires Perl to be installed.
+    - Linux based OS requires Perl to be installed for OS customization.
     - 'Common parameters (Linux/Windows):'
     - ' - C(dns_servers) (list): List of DNS servers to configure.'
-    - ' - C(dns_suffix) (list): List of domain suffixes, aka DNS search path (default: C(domain) parameter).'
+    - ' - C(dns_suffix) (list): List of domain suffixes, a.k.a. DNS search path (default: C(domain) parameter).'
     - ' - C(domain) (string): DNS domain name to use.'
     - ' - C(hostname) (string): Computer hostname (default: shorted C(name) parameter).'
+    - 'Allowed characters are alphanumeric (uppercase and lowercase) and minus, rest of the characters are dropped as per RFC 952.'
     - 'Parameters related to Windows customization:'
     - ' - C(autologon) (bool): Auto logon after VM customization (default: False).'
     - ' - C(autologoncount) (int): Number of autologon after reboot (default: 1).'
@@ -255,12 +256,12 @@ options:
   vapp_properties:
     description:
     - A list of vApp properties
-    - 'For full list of attibutes and types refer to: U(https://github.com/vmware/pyvmomi/blob/master/docs/vim/vApp/PropertyInfo.rst)'
+    - 'For full list of attributes and types refer to: U(https://github.com/vmware/pyvmomi/blob/master/docs/vim/vApp/PropertyInfo.rst)'
     - 'Basic attributes are:'
-    - ' - C(id) (string): Property id - required'
-    - ' - C(value) (string): Property value'
+    - ' - C(id) (string): Property id - required.'
+    - ' - C(value) (string): Property value.'
     - ' - C(type) (string): Value type, string type by default.'
-    - ' - C(operation): C(remove): This attribute is required only when removing properties'
+    - ' - C(operation): C(remove): This attribute is required only when removing properties.'
     version_added: '2.6'
 extends_documentation_fragment: vmware.documentation
 '''
@@ -1116,6 +1117,14 @@ class PyVmomiHelper(PyVmomi):
                 dvs_port_connection.switchUuid = pg_obj.config.distributedVirtualSwitch.uuid
                 nic.device.backing = vim.vm.device.VirtualEthernetCard.DistributedVirtualPortBackingInfo()
                 nic.device.backing.port = dvs_port_connection
+
+            elif isinstance(self.cache.get_network(network_name), vim.OpaqueNetwork):
+                # NSX-T Logical Switch
+                nic.device.backing = vim.vm.device.VirtualEthernetCard.OpaqueNetworkBackingInfo()
+                nic.device.backing.opaqueNetworkType = 'nsx.LogicalSwitch'
+                nic.device.backing.opaqueNetworkId = self.cache.get_network(network_name).summary.opaqueNetworkId
+                nic.device.deviceInfo.summary = 'nsx.LogicalSwitch: %s' % (self.cache.get_network(network_name).summary.opaqueNetworkId)
+
             else:
                 # vSwitch
                 if not isinstance(nic.device.backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo):
@@ -1350,7 +1359,10 @@ class PyVmomiHelper(PyVmomi):
                 ident.domain = str(self.params['customization']['domain'])
 
             ident.hostName = vim.vm.customization.FixedName()
-            ident.hostName.name = str(self.params['customization'].get('hostname', self.params['name'].split('.')[0]))
+            hostname = str(self.params['customization'].get('hostname', self.params['name'].split('.')[0]))
+            # Remove all characters except alphanumeric and minus which is allowed by RFC 952
+            valid_hostname = re.sub(r"[^a-zA-Z0-9\-]", "", hostname)
+            ident.hostName.name = valid_hostname
 
         self.customspec = vim.vm.customization.Specification()
         self.customspec.nicSettingMap = adaptermaps
@@ -1485,21 +1497,11 @@ class PyVmomiHelper(PyVmomi):
                 self.change_detected = True
 
     def select_host(self):
-        # if the user wants a cluster, get the list of hosts for the cluster and use the first one
-        if self.params['cluster']:
-            cluster = self.cache.get_cluster(self.params['cluster'])
-            if not cluster:
-                self.module.fail_json(msg='Failed to find cluster "%(cluster)s"' % self.params)
-            hostsystems = [x for x in cluster.host]
-            if not hostsystems:
-                self.module.fail_json(msg='No hosts found in cluster "%(cluster)s. Maybe you lack the right privileges ?"' % self.params)
-            # TODO: add a policy to select host
-            hostsystem = hostsystems[0]
-        else:
-            hostsystem = self.cache.get_esx_host(self.params['esxi_hostname'])
-            if not hostsystem:
-                self.module.fail_json(msg='Failed to find ESX host "%(esxi_hostname)s"' % self.params)
-
+        hostsystem = self.cache.get_esx_host(self.params['esxi_hostname'])
+        if not hostsystem:
+            self.module.fail_json(msg='Failed to find ESX host "%(esxi_hostname)s"' % self.params)
+        if hostsystem.runtime.connectionState != 'connected' or hostsystem.runtime.inMaintenanceMode:
+            self.module.fail_json(msg='ESXi "%(esxi_hostname)s" is in invalid state or in maintenance mode.' % self.params)
         return hostsystem
 
     def autoselect_datastore(self):
@@ -2134,6 +2136,7 @@ def main():
                 result["changed"] = True
             if not tmp_result["failed"]:
                 result["failed"] = False
+            result['instance'] = tmp_result['instance']
         else:
             # This should not happen
             raise AssertionError()

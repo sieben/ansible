@@ -292,6 +292,7 @@ def gather_vm_facts(content, vm):
         'hw_is_template': vm.config.template,
         'hw_folder': None,
         'hw_version': vm.config.version,
+        'instance_uuid': vm.config.instanceUuid,
         'guest_tools_status': _get_vm_prop(vm, ('guest', 'toolsRunningStatus')),
         'guest_tools_version': _get_vm_prop(vm, ('guest', 'toolsVersion')),
         'guest_question': vm.summary.runtime.question,
@@ -826,8 +827,7 @@ def set_vm_power_state(content, vm, state, force, timeout=0):
                 result['changed'] = True
 
     # need to get new metadata if changed
-    if result['changed']:
-        result['instance'] = gather_vm_facts(content, vm)
+    result['instance'] = gather_vm_facts(content, vm)
 
     return result
 
